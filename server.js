@@ -1,92 +1,119 @@
+// server.js - Phiên bản chạy Cloud (Neon + Vercel)
 const express = require('express');
-const sqlite3 = require('sqlite3').verbose();
+const { Pool } = require('pg'); // Dùng thư viện pg thay vì sqlite3
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const path = require('path');
 
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
-// Kết nối Database và tự động tạo bảng/cột nếu thiếu
-const db = new sqlite3.Database('./sales.db', (err) => {
-    if (err) console.error(err.message);
-    console.log('Connected to SQLite database.');
+// Lấy chuỗi kết nối từ biến môi trường (Cấu hình sau trên Vercel)
+// Nếu chạy local để test thì bạn thay chuỗi connection string của bạn vào dấu '' bên dưới
+const connectionString = process.env.DATABASE_URL || ''; 
 
-    const createTable = `CREATE TABLE IF NOT EXISTS transactions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cost REAL,
-        price REAL,
-        note TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        is_archived INTEGER DEFAULT 0 
-    )`;
-
-    db.run(createTable, (err) => {
-        if (!err) {
-            // Cố gắng thêm cột is_archived cho các db cũ (nếu chưa có)
-            db.run(`ALTER TABLE transactions ADD COLUMN is_archived INTEGER DEFAULT 0`, () => {});
-        }
-    });
+const pool = new Pool({
+    connectionString: connectionString,
+    ssl: { rejectUnauthorized: false } // Bắt buộc cho Neon
 });
 
-// API: Lấy danh sách (chỉ lấy cái chưa chốt sổ)
-app.get('/api/transactions', (req, res) => {
-    db.all("SELECT * FROM transactions WHERE is_archived = 0 ORDER BY created_at DESC", [], (err, rows) => {
-        if (err) return res.status(400).json({ error: err.message });
-        res.json({ data: rows });
-    });
+// Tạo bảng nếu chưa có (Dùng cú pháp PostgreSQL)
+const initDB = async () => {
+    const client = await pool.connect();
+    try {
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS transactions (
+                id SERIAL PRIMARY KEY,
+                cost REAL,
+                price REAL,
+                note TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                is_archived INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'sold'
+            );
+        `);
+        console.log("Database connected & checked!");
+    } catch (err) {
+        console.error("Error initializing DB:", err);
+    } finally {
+        client.release();
+    }
+};
+initDB();
+
+// API Helper: Thực hiện query an toàn
+const runQuery = async (query, params = []) => {
+    const client = await pool.connect();
+    try {
+        const result = await client.query(query, params);
+        return result;
+    } finally {
+        client.release();
+    }
+};
+
+// --- CÁC API ---
+
+// 1. Lấy danh sách
+app.get('/api/transactions', async (req, res) => {
+    try {
+        const result = await runQuery("SELECT * FROM transactions WHERE is_archived = 0 ORDER BY created_at DESC");
+        res.json({ data: result.rows });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// API: Thêm mới
-app.post('/api/transactions', (req, res) => {
+// 2. Thêm mới
+app.post('/api/transactions', async (req, res) => {
     const { cost, price, note } = req.body;
-    const sql = `INSERT INTO transactions (cost, price, note, is_archived) VALUES (?, ?, ?, 0)`;
-    db.run(sql, [cost, price, note], function(err) {
-        if (err) return res.status(400).json({ error: err.message });
-        res.json({ id: this.lastID });
-    });
+    try {
+        // Postgres dùng $1, $2 thay vì ?
+        const sql = `INSERT INTO transactions (cost, price, note, status, is_archived) VALUES ($1, $2, $3, 'sold', 0) RETURNING id`;
+        const result = await runQuery(sql, [cost, price, note]);
+        res.json({ id: result.rows[0].id });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// API: Sửa
-app.put('/api/transactions/:id', (req, res) => {
+// 3. Sửa
+app.put('/api/transactions/:id', async (req, res) => {
     const { cost, price, note } = req.body;
-    db.run(`UPDATE transactions SET cost = ?, price = ?, note = ? WHERE id = ?`, 
-        [cost, price, note, req.params.id], 
-        function(err) {
-            if (err) return res.status(400).json({ error: err.message });
-            res.json({ message: "Updated" });
-    });
+    try {
+        const sql = `UPDATE transactions SET cost = $1, price = $2, note = $3 WHERE id = $4`;
+        await runQuery(sql, [cost, price, note, req.params.id]);
+        res.json({ message: "Updated" });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// API: Xóa 1 dòng
-app.delete('/api/transactions/:id', (req, res) => {
-    db.run(`DELETE FROM transactions WHERE id = ?`, req.params.id, function(err) {
-        if (err) return res.status(400).json({ error: err.message });
+// 4. Xóa 1 dòng
+app.delete('/api/transactions/:id', async (req, res) => {
+    try {
+        await runQuery(`DELETE FROM transactions WHERE id = $1`, [req.params.id]);
         res.json({ message: "Deleted" });
-    });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// API: Xóa theo tháng
-app.post('/api/delete-month', (req, res) => {
-    const { month, year } = req.body;
-    const dateStr = `${year}-${month}`; 
-    db.run(`DELETE FROM transactions WHERE strftime('%Y-%m', created_at) = ?`, [dateStr], function(err) {
-        if (err) return res.status(400).json({ error: err.message });
-        res.json({ changes: this.changes });
-    });
+// 5. Xóa theo tháng (Postgres dùng TO_CHAR thay vì strftime)
+app.post('/api/delete-month', async (req, res) => {
+    const { month, year } = req.body; // month: '11', year: '2025'
+    const dateStr = `${year}-${month}`;
+    try {
+        const sql = `DELETE FROM transactions WHERE TO_CHAR(created_at, 'YYYY-MM') = $1`;
+        const result = await runQuery(sql, [dateStr]);
+        res.json({ changes: result.rowCount });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// API: Chốt sổ (Reset về 0)
-app.post('/api/settle', (req, res) => {
-    db.run(`UPDATE transactions SET is_archived = 1 WHERE is_archived = 0`, [], function(err) {
-        if (err) return res.status(400).json({ error: err.message });
-        res.json({ changes: this.changes });
-    });
+// 6. Chốt sổ
+app.post('/api/settle', async (req, res) => {
+    try {
+        const result = await runQuery(`UPDATE transactions SET is_archived = 1 WHERE is_archived = 0`);
+        res.json({ changes: result.rowCount });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.listen(PORT, () => {
-    console.log(`Server running at http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });
