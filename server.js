@@ -1,30 +1,28 @@
-// server.js - Phiên bản chạy Cloud (Neon + Vercel)
+// server.js - Phiên bản Vercel + Neon
 const express = require('express');
-const { Pool } = require('pg'); // Dùng thư viện pg thay vì sqlite3
+const { Pool } = require('pg');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
+// Middleware
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static('public'));
+// Phục vụ file giao diện từ thư mục public
+app.use(express.static(path.join(__dirname, 'public')));
 
-// Lấy chuỗi kết nối từ biến môi trường (Cấu hình sau trên Vercel)
-// Nếu chạy local để test thì bạn thay chuỗi connection string của bạn vào dấu '' bên dưới
-const connectionString = process.env.DATABASE_URL || ''; 
-
+// Kết nối Database Neon
 const pool = new Pool({
-    connectionString: connectionString,
-    ssl: { rejectUnauthorized: false } // Bắt buộc cho Neon
+    connectionString: process.env.DATABASE_URL, // Biến này sẽ cài trên Vercel
+    ssl: { rejectUnauthorized: false }
 });
 
-// Tạo bảng nếu chưa có (Dùng cú pháp PostgreSQL)
+// Hàm tạo bảng (Chạy mỗi khi server khởi động để chắc chắn bảng tồn tại)
 const initDB = async () => {
-    const client = await pool.connect();
     try {
+        const client = await pool.connect();
         await client.query(`
             CREATE TABLE IF NOT EXISTS transactions (
                 id SERIAL PRIMARY KEY,
@@ -36,21 +34,20 @@ const initDB = async () => {
                 status TEXT DEFAULT 'sold'
             );
         `);
-        console.log("Database connected & checked!");
-    } catch (err) {
-        console.error("Error initializing DB:", err);
-    } finally {
         client.release();
+        console.log("DB Checked/Created");
+    } catch (err) {
+        console.error("DB Error:", err);
     }
 };
 initDB();
 
-// API Helper: Thực hiện query an toàn
-const runQuery = async (query, params = []) => {
+// Helper chạy query
+const runQuery = async (text, params) => {
     const client = await pool.connect();
     try {
-        const result = await client.query(query, params);
-        return result;
+        const res = await client.query(text, params);
+        return res;
     } finally {
         client.release();
     }
@@ -58,62 +55,63 @@ const runQuery = async (query, params = []) => {
 
 // --- CÁC API ---
 
-// 1. Lấy danh sách
 app.get('/api/transactions', async (req, res) => {
     try {
-        const result = await runQuery("SELECT * FROM transactions WHERE is_archived = 0 ORDER BY created_at DESC");
-        res.json({ data: result.rows });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        const { rows } = await runQuery("SELECT * FROM transactions WHERE is_archived = 0 ORDER BY created_at DESC");
+        res.json({ data: rows });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 2. Thêm mới
 app.post('/api/transactions', async (req, res) => {
     const { cost, price, note } = req.body;
     try {
-        // Postgres dùng $1, $2 thay vì ?
-        const sql = `INSERT INTO transactions (cost, price, note, status, is_archived) VALUES ($1, $2, $3, 'sold', 0) RETURNING id`;
-        const result = await runQuery(sql, [cost, price, note]);
-        res.json({ id: result.rows[0].id });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        // Postgres dùng $1, $2... thay vì ?
+        await runQuery(
+            "INSERT INTO transactions (cost, price, note, status, is_archived) VALUES ($1, $2, $3, 'sold', 0)", 
+            [cost, price, note]
+        );
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 3. Sửa
 app.put('/api/transactions/:id', async (req, res) => {
     const { cost, price, note } = req.body;
     try {
-        const sql = `UPDATE transactions SET cost = $1, price = $2, note = $3 WHERE id = $4`;
-        await runQuery(sql, [cost, price, note, req.params.id]);
-        res.json({ message: "Updated" });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        await runQuery(
+            "UPDATE transactions SET cost = $1, price = $2, note = $3 WHERE id = $4",
+            [cost, price, note, req.params.id]
+        );
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 4. Xóa 1 dòng
 app.delete('/api/transactions/:id', async (req, res) => {
     try {
-        await runQuery(`DELETE FROM transactions WHERE id = $1`, [req.params.id]);
-        res.json({ message: "Deleted" });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        await runQuery("DELETE FROM transactions WHERE id = $1", [req.params.id]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 5. Xóa theo tháng (Postgres dùng TO_CHAR thay vì strftime)
 app.post('/api/delete-month', async (req, res) => {
-    const { month, year } = req.body; // month: '11', year: '2025'
+    const { month, year } = req.body;
     const dateStr = `${year}-${month}`;
     try {
-        const sql = `DELETE FROM transactions WHERE TO_CHAR(created_at, 'YYYY-MM') = $1`;
-        const result = await runQuery(sql, [dateStr]);
-        res.json({ changes: result.rowCount });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        await runQuery("DELETE FROM transactions WHERE TO_CHAR(created_at, 'YYYY-MM') = $1", [dateStr]);
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 6. Chốt sổ
 app.post('/api/settle', async (req, res) => {
     try {
-        const result = await runQuery(`UPDATE transactions SET is_archived = 1 WHERE is_archived = 0`);
-        res.json({ changes: result.rowCount });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        await runQuery("UPDATE transactions SET is_archived = 1 WHERE is_archived = 0");
+        res.json({ success: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+// Route mặc định trả về index.html
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
+
+// Xuất app để Vercel sử dụng (Quan trọng)
+module.exports = app;
