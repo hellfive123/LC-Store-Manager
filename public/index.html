@@ -33,24 +33,28 @@
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen pb-10">
 
-    <nav class="bg-white border-b border-slate-200 sticky top-0 z-30">
+	<nav class="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
-                <div class="flex items-center gap-3">
-                    <div class="bg-primary text-white p-2 rounded-lg">
-                        <i class="fas fa-cube text-xl"></i>
+                <div class="flex items-center gap-2 md:gap-3">
+                    <div class="bg-primary text-white p-1.5 md:p-2 rounded-lg">
+                        <i class="fas fa-cube text-lg md:text-xl"></i>
                     </div>
                     <div>
-                        <h1 class="text-xl font-bold text-primary tracking-tight">LC Store</h1>
-                        <p class="text-xs text-slate-500 font-medium">Revenue Dashboard</p>
+                        <h1 class="text-lg md:text-xl font-bold text-primary tracking-tight">LC Store</h1>
+                        <p class="text-[10px] md:text-xs text-slate-500 font-medium hidden md:block">Revenue Dashboard</p>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <button onclick="settleAll()" class="hidden md:flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium transition">
-                        <i class="fas fa-history"></i> Chốt sổ & Reset
+
+                <div class="flex items-center gap-2">
+                    <button onclick="settleAll()" class="flex items-center gap-1 md:gap-2 bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-2 rounded-lg text-xs md:text-sm font-medium transition whitespace-nowrap">
+                        <i class="fas fa-history"></i> 
+                        <span>Reset</span>
                     </button>
-                    <button onclick="exportToExcel()" class="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-sm transition">
-                        <i class="fas fa-file-export"></i> Xuất Excel
+                    
+                    <button onclick="exportToExcel()" class="flex items-center gap-1 md:gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs md:text-sm font-medium shadow-sm transition whitespace-nowrap">
+                        <i class="fas fa-file-export"></i> 
+                        <span class="hidden md:inline">Excel</span> <span class="inline md:hidden">Xuất</span>
                     </button>
                 </div>
             </div>
