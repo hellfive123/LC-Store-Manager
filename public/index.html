@@ -339,11 +339,21 @@
                 fetchTransactions();
             }
         }
-
+	
+		// Hàm Chốt sổ (MỚI)
         const settleAll = async () => {
-            if (confirm("CHỐT SỔ: Hành động này sẽ ẩn toàn bộ dữ liệu hiện tại để bắt đầu chu kỳ mới?")) {
-                await axios.post('/api/settle');
-                fetchTransactions();
+            // Lấy ngày hiện tại theo định dạng YYYY-MM-DD (Giờ Việt Nam)
+            // 'en-CA' là mẹo để lấy format yyyy-mm-dd chuẩn
+            const today = new Date().toLocaleDateString('en-CA'); 
+
+            if (confirm(`Bạn có chắc muốn CHỐT SỔ ngày hôm nay (${today})?\n\n- Doanh thu hôm nay sẽ được ẩn đi để reset về 0.\n- Dữ liệu các ngày trước vẫn giữ nguyên.`)) {
+                try {
+                    await axios.post('/api/settle', { date: today });
+                    fetchTransactions(); // Tải lại bảng
+                    alert("Đã chốt sổ hôm nay thành công!");
+                } catch (e) { 
+                    alert("Lỗi khi chốt sổ: " + e.message); 
+                }
             }
         }
 

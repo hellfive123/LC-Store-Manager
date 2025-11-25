@@ -102,10 +102,23 @@ app.post('/api/delete-month', async (req, res) => {
 });
 
 app.post('/api/settle', async (req, res) => {
+    const { date } = req.body; // Nhận ngày từ Client (dạng '2025-11-25')
+    
+    if (!date) return res.status(400).json({ error: "Thiếu ngày chốt sổ" });
+
     try {
-        await runQuery("UPDATE transactions SET is_archived = 1 WHERE is_archived = 0");
-        res.json({ success: true });
-    } catch (e) { res.status(500).json({ error: e.message }); }
+        // Postgres: Cộng 7 tiếng để đổi UTC sang giờ VN, sau đó so sánh ngày
+        const sql = `
+            UPDATE transactions 
+            SET is_archived = 1 
+            WHERE is_archived = 0 
+            AND TO_CHAR(created_at + interval '7 hours', 'YYYY-MM-DD') = $1
+        `;
+        const result = await runQuery(sql, [date]);
+        res.json({ success: true, changes: result.rowCount });
+    } catch (e) { 
+        res.status(500).json({ error: e.message }); 
+    }
 });
 
 // Route mặc định trả về index.html
