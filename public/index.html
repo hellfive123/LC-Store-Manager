@@ -198,13 +198,20 @@
             const val = document.getElementById(inputId).value;
             document.getElementById(previewId).innerText = val ? `${formatCurrency(val * 1000)}` : '';
         }
-
-        const renderData = (transactions) => {
+	
+		const renderData = (transactions) => {
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
 
-            let totalProfit = 0, totalCuong = 0, totalLong = 0, profitToday = 0, profitMonth = 0;
+            let totalProfit = 0; // Tổng lợi nhuận (của tất cả lịch sử đang hiện)
+            let totalCuong = 0;  // Chỉ tính hôm nay
+            let totalLong = 0;   // Chỉ tính hôm nay
+            
+            let profitToday = 0;
+            let profitMonth = 0;
+            
             const now = new Date();
+            const todayString = now.toDateString(); // Lấy chuỗi ngày hôm nay (theo giờ máy điện thoại)
 
             if (transactions.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="5" class="text-center py-10 text-slate-400 italic">Chưa có dữ liệu giao dịch</td></tr>`;
@@ -212,15 +219,25 @@
 
             transactions.forEach(t => {
                 const profit = t.price - t.cost;
-                const date = new Date(t.created_at);
+                const date = new Date(t.created_at); // Tự động chuyển giờ Server về giờ điện thoại
+                const dateString = date.toDateString();
 
+                // 1. Tính tổng lợi nhuận hiển thị (Vẫn cộng hết để xem lịch sử)
                 totalProfit += profit;
-                totalCuong += (t.cost + profit / 2);
-                totalLong += (profit / 2);
 
-                if (date.toDateString() === now.toDateString()) profitToday += profit;
-                if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) profitMonth += profit;
+                // 2. LOGIC MỚI: Chỉ tính tiền chia Cường/Long cho đơn hàng HÔM NAY
+                if (dateString === todayString) {
+                    totalCuong += (t.cost + profit / 2);
+                    totalLong += (profit / 2);
+                    profitToday += profit;
+                }
 
+                // 3. Tính tháng
+                if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
+                    profitMonth += profit;
+                }
+
+                // Render bảng (Giữ nguyên)
                 const tr = `
                     <tr class="hover:bg-slate-50 transition group">
                         <td class="px-6 py-4 whitespace-nowrap">
@@ -236,7 +253,7 @@
                             +${formatCurrency(profit)}
                         </td>
                         <td class="px-6 py-4 text-center whitespace-nowrap">
-                            <div class="invisible group-hover:visible flex justify-center gap-2">
+                            <div class="visible md:invisible group-hover:visible flex justify-center gap-2">
                                 <button onclick="editTransaction(${t.id}, ${t.cost}, ${t.price}, '${t.note}')" class="w-8 h-8 rounded flex items-center justify-center text-blue-600 hover:bg-blue-100 bg-blue-50 transition"><i class="fas fa-pen text-xs"></i></button>
                                 <button onclick="deleteTransaction(${t.id})" class="w-8 h-8 rounded flex items-center justify-center text-red-500 hover:bg-red-100 bg-red-50 transition"><i class="fas fa-trash text-xs"></i></button>
                             </div>
@@ -249,7 +266,11 @@
             // Update Stats
             document.getElementById('totalCuong').innerText = formatCurrency(totalCuong);
             document.getElementById('totalLong').innerText = formatCurrency(totalLong);
-            document.getElementById('profitTotal').innerText = formatCurrency(totalProfit);
+            
+            // Hiển thị tổng lợi nhuận (Tùy bạn muốn hiển thị Tổng All hay Tổng Hôm nay ở ô màu xanh đậm)
+            // Hiện tại mình để hiển thị Tổng All của lịch sử đang có
+            document.getElementById('profitTotal').innerText = formatCurrency(totalProfit); 
+            
             document.getElementById('profitToday').innerText = formatCurrency(profitToday);
             document.getElementById('profitMonth').innerText = formatCurrency(profitMonth);
         }
