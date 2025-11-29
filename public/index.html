@@ -199,19 +199,20 @@
             document.getElementById(previewId).innerText = val ? `${formatCurrency(val * 1000)}` : '';
         }
 	
-		const renderData = (transactions) => {
+// Hàm tính toán và hiển thị
+        const renderData = (transactions) => {
             const tbody = document.getElementById('tableBody');
             tbody.innerHTML = '';
 
-            let totalProfit = 0; // Tổng lợi nhuận (của tất cả lịch sử đang hiện)
-            let totalCuong = 0;  // Chỉ tính hôm nay
-            let totalLong = 0;   // Chỉ tính hôm nay
+            let totalProfit = 0; // Tổng lợi nhuận (chỉ tính cái chưa chốt)
+            let totalCuong = 0;  // Chỉ tính cái chưa chốt
+            let totalLong = 0;   // Chỉ tính cái chưa chốt
             
             let profitToday = 0;
             let profitMonth = 0;
             
             const now = new Date();
-            const todayString = now.toDateString(); // Lấy chuỗi ngày hôm nay (theo giờ máy điện thoại)
+            const todayString = now.toDateString();
 
             if (transactions.length === 0) {
                 tbody.innerHTML = `<tr><td colspan="5" class="text-center py-10 text-slate-400 italic">Chưa có dữ liệu giao dịch</td></tr>`;
@@ -219,43 +220,47 @@
 
             transactions.forEach(t => {
                 const profit = t.price - t.cost;
-                const date = new Date(t.created_at); // Tự động chuyển giờ Server về giờ điện thoại
+                const date = new Date(t.created_at);
                 const dateString = date.toDateString();
+                
+                // Kiểm tra xem dòng này đã chốt chưa (Nếu settlement_id là null hoặc 0 thì là chưa chốt)
+                const isSettled = (t.settlement_id !== null && t.settlement_id !== 0);
 
-                // 1. Tính tổng lợi nhuận hiển thị (Vẫn cộng hết để xem lịch sử)
-                totalProfit += profit;
-
-                // 2. LOGIC MỚI: Chỉ tính tiền chia Cường/Long cho đơn hàng HÔM NAY
-                if (dateString === todayString) {
+                // LOGIC TÍNH TIỀN: Chỉ cộng nếu CHƯA CHỐT
+                if (!isSettled) {
+                    totalProfit += profit;
                     totalCuong += (t.cost + profit / 2);
                     totalLong += (profit / 2);
-                    profitToday += profit;
                 }
 
-                // 3. Tính tháng
-                if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) {
-                    profitMonth += profit;
-                }
+                // Thống kê hôm nay/tháng (Vẫn tính hết để xem cho vui)
+                if (dateString === todayString) profitToday += profit;
+                if (date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear()) profitMonth += profit;
 
-                // Render bảng (Giữ nguyên)
+                // Render giao diện
+                // Nếu đã chốt rồi thì làm mờ đi chút (opacity-50) và thêm icon khóa
+                const rowClass = isSettled ? 'bg-gray-100 text-gray-500' : 'hover:bg-slate-50 transition group';
+                const statusIcon = isSettled ? '<i class="fas fa-check-circle text-gray-400" title="Đã chốt sổ"></i>' : '';
+
                 const tr = `
-                    <tr class="hover:bg-slate-50 transition group">
+                    <tr class="${rowClass}">
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <span class="block font-medium text-slate-700">${date.toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}</span>
+                            <span class="block font-medium ${isSettled ? 'text-gray-500' : 'text-slate-700'}">
+                                ${date.toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})}
+                            </span>
                             <span class="text-xs text-slate-400">${date.toLocaleDateString('vi-VN')}</span>
                         </td>
-                        <td class="px-6 py-4 font-medium text-slate-800">${t.note}</td>
+                        <td class="px-6 py-4 font-medium">${t.note} ${statusIcon}</td>
                         <td class="px-6 py-4 text-right whitespace-nowrap">
                             <div class="text-xs text-slate-400">Gốc: ${formatCurrency(t.cost)}</div>
-                            <div class="text-slate-600 font-medium">Bán: ${formatCurrency(t.price)}</div>
+                            <div class="font-medium">Bán: ${formatCurrency(t.price)}</div>
                         </td>
-                        <td class="px-6 py-4 text-right font-bold text-emerald-600 whitespace-nowrap bg-emerald-50/30">
+                        <td class="px-6 py-4 text-right font-bold ${isSettled ? 'text-gray-400' : 'text-emerald-600'} whitespace-nowrap">
                             +${formatCurrency(profit)}
                         </td>
                         <td class="px-6 py-4 text-center whitespace-nowrap">
-                            <div class="visible md:invisible group-hover:visible flex justify-center gap-2">
-                                <button onclick="editTransaction(${t.id}, ${t.cost}, ${t.price}, '${t.note}')" class="w-8 h-8 rounded flex items-center justify-center text-blue-600 hover:bg-blue-100 bg-blue-50 transition"><i class="fas fa-pen text-xs"></i></button>
-                                <button onclick="deleteTransaction(${t.id})" class="w-8 h-8 rounded flex items-center justify-center text-red-500 hover:bg-red-100 bg-red-50 transition"><i class="fas fa-trash text-xs"></i></button>
+                            <div class="flex justify-center gap-2">
+                                <button onclick="deleteTransaction(${t.id})" class="text-red-300 hover:text-red-500"><i class="fas fa-trash text-xs"></i></button>
                             </div>
                         </td>
                     </tr>
@@ -263,16 +268,27 @@
                 tbody.innerHTML += tr;
             });
 
-            // Update Stats
+            // Update Stats (Chỉ hiển thị số tiền của các đơn CHƯA CHỐT)
             document.getElementById('totalCuong').innerText = formatCurrency(totalCuong);
             document.getElementById('totalLong').innerText = formatCurrency(totalLong);
+            document.getElementById('profitTotal').innerText = formatCurrency(totalProfit);
             
-            // Hiển thị tổng lợi nhuận (Tùy bạn muốn hiển thị Tổng All hay Tổng Hôm nay ở ô màu xanh đậm)
-            // Hiện tại mình để hiển thị Tổng All của lịch sử đang có
-            document.getElementById('profitTotal').innerText = formatCurrency(totalProfit); 
-            
+            // Các ô thống kê phụ vẫn hiện tổng thực tế
             document.getElementById('profitToday').innerText = formatCurrency(profitToday);
             document.getElementById('profitMonth').innerText = formatCurrency(profitMonth);
+        }
+
+        // Hàm Reset tiền (Chốt sổ mới)
+        const settleAll = async () => {
+            if (confirm("RESET TIỀN VỀ 0?\n\n- Các đơn hàng hiện tại sẽ được đánh dấu là 'Đã tính tiền'.\n- Danh sách vẫn giữ nguyên, nhưng số tiền Cường/Long sẽ về 0.")) {
+                try {
+                    await axios.post('/api/settle');
+                    fetchTransactions();
+                    alert("Đã reset tiền thành công!");
+                } catch (e) { 
+                    alert("Lỗi: " + e.message); 
+                }
+            }
         }
 
         const fetchTransactions = async () => {
@@ -358,23 +374,6 @@
             if (confirm(`Xóa sạch tháng ${month}/${year}?`)) {
                 await axios.post('/api/delete-month', { month, year });
                 fetchTransactions();
-            }
-        }
-	
-		// Hàm Chốt sổ (MỚI)
-        const settleAll = async () => {
-            // Lấy ngày hiện tại theo định dạng YYYY-MM-DD (Giờ Việt Nam)
-            // 'en-CA' là mẹo để lấy format yyyy-mm-dd chuẩn
-            const today = new Date().toLocaleDateString('en-CA'); 
-
-            if (confirm(`Bạn có chắc muốn CHỐT SỔ ngày hôm nay (${today})?\n\n- Doanh thu hôm nay sẽ được ẩn đi để reset về 0.\n- Dữ liệu các ngày trước vẫn giữ nguyên.`)) {
-                try {
-                    await axios.post('/api/settle', { date: today });
-                    fetchTransactions(); // Tải lại bảng
-                    alert("Đã chốt sổ hôm nay thành công!");
-                } catch (e) { 
-                    alert("Lỗi khi chốt sổ: " + e.message); 
-                }
             }
         }
 
