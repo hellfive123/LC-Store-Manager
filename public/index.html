@@ -239,6 +239,8 @@
 
                 // Render giao diện
                 // Nếu đã chốt rồi thì làm mờ đi chút (opacity-50) và thêm icon khóa
+
+                // Render giao diện
                 const rowClass = isSettled ? 'bg-gray-100 text-gray-500' : 'hover:bg-slate-50 transition group';
                 const statusIcon = isSettled ? '<i class="fas fa-check-circle text-gray-400" title="Đã chốt sổ"></i>' : '';
 
@@ -259,8 +261,14 @@
                             +${formatCurrency(profit)}
                         </td>
                         <td class="px-6 py-4 text-center whitespace-nowrap">
-                            <div class="flex justify-center gap-2">
-                                <button onclick="deleteTransaction(${t.id})" class="text-red-300 hover:text-red-500"><i class="fas fa-trash text-xs"></i></button>
+                            <div class="flex justify-center gap-3">
+                                <button onclick="editTransaction(${t.id}, ${t.cost}, ${t.price}, '${t.note}')" class="text-blue-400 hover:text-blue-600 transition" title="Sửa">
+                                    <i class="fas fa-pen text-xs"></i>
+                                </button>
+                                
+                                <button onclick="deleteTransaction(${t.id})" class="text-red-300 hover:text-red-500 transition" title="Xóa">
+                                    <i class="fas fa-trash text-xs"></i>
+                                </button>
                             </div>
                         </td>
                     </tr>
