@@ -35,10 +35,10 @@ app.get('/api/transactions', async (req, res) => {
     try {
         const sql = `
             SELECT * FROM transactions 
-            ORDER BY 
-                CASE WHEN settlement_id IS NULL THEN 0 ELSE 1 END, 
+            ORDER BY
+                CASE WHEN settlement_id IS NULL THEN 0 ELSE 1 END,
                 created_at DESC
-            LIMIT 100 -- Giới hạn 100 dòng cho nhẹ, hoặc bỏ dòng này nếu muốn lấy hết
+            LIMIT 500
         `;
         const { rows } = await runQuery(sql);
         res.json({ data: rows });
@@ -92,6 +92,42 @@ app.post('/api/settle', async (req, res) => {
         `;
         const result = await runQuery(sql, [newSettlementId]);
         res.json({ success: true, changes: result.rowCount });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 6. Xóa toàn bộ giao dịch của một tháng
+app.post('/api/delete-month', async (req, res) => {
+    const month = Number(req.body.month);
+    const year = Number(req.body.year);
+    if (!month || !year) return res.status(400).json({ error: 'Thiếu tháng hoặc năm' });
+    try {
+        const result = await runQuery(
+            `DELETE FROM transactions
+             WHERE EXTRACT(MONTH FROM created_at) = $1 AND EXTRACT(YEAR FROM created_at) = $2`,
+            [month, year]
+        );
+        res.json({ success: true, deleted: result.rowCount });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 7. Lịch sử các đợt chốt sổ (gộp theo settlement_id)
+app.get('/api/settlements', async (req, res) => {
+    try {
+        const sql = `
+            SELECT settlement_id,
+                   COUNT(*)           AS tx_count,
+                   SUM(cost)          AS total_cost,
+                   SUM(price)         AS total_price,
+                   SUM(price - cost)  AS total_profit,
+                   MIN(created_at)    AS from_date,
+                   MAX(created_at)    AS to_date
+            FROM transactions
+            WHERE settlement_id IS NOT NULL
+            GROUP BY settlement_id
+            ORDER BY settlement_id DESC
+        `;
+        const { rows } = await runQuery(sql);
+        res.json({ data: rows });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
