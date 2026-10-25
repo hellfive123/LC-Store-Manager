@@ -70,10 +70,30 @@ app.put('/api/transactions/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// 4. Xóa
+// 4. Xóa — trả lại dòng vừa xóa để client có thể hoàn tác
 app.delete('/api/transactions/:id', async (req, res) => {
     try {
-        await runQuery("DELETE FROM transactions WHERE id = $1", [req.params.id]);
+        // created_at_raw: giờ gốc dạng text của Postgres, khôi phục không bị lệch múi giờ khi qua JS
+        const { rows } = await runQuery(
+            "DELETE FROM transactions WHERE id = $1 RETURNING *, created_at::text AS created_at_raw",
+            [req.params.id]
+        );
+        res.json({ success: true, deleted: rows[0] || null });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 4b. Hoàn tác xóa: chèn lại đúng dòng cũ (giữ id, ngày tạo, trạng thái chốt)
+app.post('/api/transactions/restore', async (req, res) => {
+    const t = req.body || {};
+    if (!Number.isInteger(t.id) || typeof t.created_at_raw !== 'string' || !t.created_at_raw) {
+        return res.status(400).json({ error: 'Dữ liệu khôi phục không hợp lệ' });
+    }
+    try {
+        await runQuery(
+            `INSERT INTO transactions (id, cost, price, note, created_at, is_archived, status, settlement_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [t.id, t.cost, t.price, t.note, t.created_at_raw, t.is_archived ?? null, t.status ?? 'sold', t.settlement_id ?? null]
+        );
         res.json({ success: true });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -154,6 +174,40 @@ app.get('/api/stats', async (req, res) => {
             [since]
         );
         res.json({ data: s, recent });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// 9. Thống kê theo tháng (giờ Việt Nam), 12 tháng gần nhất, kèm ngày bán tốt nhất mỗi tháng
+app.get('/api/monthly', async (req, res) => {
+    try {
+        const sql = `
+            WITH d AS (
+                SELECT created_at::timestamptz AT TIME ZONE 'Asia/Ho_Chi_Minh' AS vn, cost, price
+                FROM transactions
+            ),
+            days AS (
+                SELECT date_trunc('day', vn) AS day, SUM(price - cost) AS profit
+                FROM d GROUP BY 1
+            ),
+            best AS (
+                SELECT DISTINCT ON (date_trunc('month', day)) date_trunc('month', day) AS month, day, profit
+                FROM days ORDER BY date_trunc('month', day), profit DESC
+            )
+            SELECT to_char(date_trunc('month', d.vn), 'YYYY-MM') AS month,
+                   COUNT(*)                            AS tx_count,
+                   SUM(d.price)                        AS revenue,
+                   SUM(d.cost)                         AS cost,
+                   SUM(d.price - d.cost)               AS profit,
+                   COUNT(DISTINCT date_trunc('day', d.vn)) AS active_days,
+                   to_char(b.day, 'YYYY-MM-DD')        AS best_day,
+                   b.profit                            AS best_day_profit
+            FROM d JOIN best b ON b.month = date_trunc('month', d.vn)
+            GROUP BY 1, b.day, b.profit
+            ORDER BY 1 DESC
+            LIMIT 12
+        `;
+        const { rows } = await runQuery(sql);
+        res.json({ data: rows });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
