@@ -131,6 +131,32 @@ app.get('/api/settlements', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// 8. Số liệu tổng (KPI + biểu đồ) tính trên TOÀN BỘ bảng, không bị LIMIT 500 cắt
+// Client gửi mốc đầu ngày / đầu tháng / đầu 14 ngày theo giờ của trình duyệt (ISO)
+app.get('/api/stats', async (req, res) => {
+    const { day, month, since } = req.query;
+    const valid = [day, month, since].every(v => v && !isNaN(Date.parse(v)));
+    if (!valid) return res.status(400).json({ error: 'Thiếu mốc thời gian' });
+    try {
+        const sql = `
+            SELECT
+                COALESCE(SUM(price - cost) FILTER (WHERE created_at >= $1), 0) AS today,
+                COALESCE(SUM(price - cost) FILTER (WHERE created_at >= $2), 0) AS month,
+                COALESCE(SUM(price - cost), 0)                                 AS all_time,
+                COALESCE(SUM(price - cost) FILTER (WHERE settlement_id IS NULL), 0) AS open,
+                COALESCE(SUM(cost) FILTER (WHERE settlement_id IS NULL), 0)         AS open_cost,
+                COUNT(*) FILTER (WHERE settlement_id IS NULL)                        AS open_count
+            FROM transactions
+        `;
+        const { rows: [s] } = await runQuery(sql, [day, month]);
+        const { rows: recent } = await runQuery(
+            "SELECT created_at, price - cost AS profit FROM transactions WHERE created_at >= $1",
+            [since]
+        );
+        res.json({ data: s, recent });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Route mặc định
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
